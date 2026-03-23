@@ -24,8 +24,7 @@ mod test {
         let (client, _admin) = setup_test(&env);
 
         env.as_contract(&client.address, || {
-            let stats =
-                monitoring::get_performance_stats(&env, Symbol::new(&env, "never_called"));
+            let stats = monitoring::get_performance_stats(&env, Symbol::new(&env, "never_called"));
             assert_eq!(stats.call_count, 0);
             assert_eq!(stats.total_time, 0);
             assert_eq!(stats.avg_time, 0);
@@ -199,7 +198,10 @@ mod test {
             // Verify the first entry still exists
             let first = build_func_symbol(&env, 0);
             let stats_first = monitoring::get_performance_stats(&env, first.clone());
-            assert_eq!(stats_first.call_count, 1, "first entry should still exist at capacity");
+            assert_eq!(
+                stats_first.call_count, 1,
+                "first entry should still exist at capacity"
+            );
 
             // Add one more — should evict func_0 (the oldest)
             let overflow = build_func_symbol(&env, max);
@@ -218,7 +220,10 @@ mod test {
             // Second entry (func_1) should survive the eviction
             let second = build_func_symbol(&env, 1);
             let stats_second = monitoring::get_performance_stats(&env, second);
-            assert_eq!(stats_second.call_count, 1, "second entry must survive eviction");
+            assert_eq!(
+                stats_second.call_count, 1,
+                "second entry must survive eviction"
+            );
         });
     }
 
