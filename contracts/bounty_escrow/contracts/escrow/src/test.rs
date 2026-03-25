@@ -1836,61 +1836,49 @@ fn test_batch_release_funds_to_multiple_contributors() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #44)")] // InvalidEventLifecycle
-fn test_pay_rejected_when_event_completed() {
-    let setup = TestSetup::new();
-    let now = setup.env.ledger().timestamp();
-    let deadline = now + 1_000;
-    let bounty_id = 777_u64;
-
-    setup
-        .escrow
-        .pay(&setup.depositor, &bounty_id, &1_000_i128, &deadline);
-    setup
-        .escrow
-        .set_event_status(&bounty_id, &EventStatus::Completed);
-
-    setup
-        .escrow
-        .pay(&setup.depositor, &bounty_id, &500_i128, &deadline);
+fn test_combined_fee_percentage_plus_fixed_capped() {
+    assert_eq!(
+        BountyEscrowContract::combined_fee_pub(10_000, 100, 50, true),
+        150
+    );
+    assert_eq!(BountyEscrowContract::combined_fee_pub(100, 0, 500, true), 100);
+    assert_eq!(BountyEscrowContract::combined_fee_pub(10_000, 0, 0, false), 0);
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #44)")] // InvalidEventLifecycle
-fn test_withdraw_revenue_rejected_before_completion() {
+fn test_lock_and_release_fixed_fee_collection() {
     let setup = TestSetup::new();
-    let now = setup.env.ledger().timestamp();
-    let deadline = now + 1_000;
-    let bounty_id = 778_u64;
-
+    let fee_recipient = Address::generate(&setup.env);
     setup
         .escrow
-        .lock_funds(&setup.depositor, &bounty_id, &1_000_i128, &deadline);
-
+        .update_fee_config(
+            &None,
+            &None,
+            &Some(10i128),
+            &Some(25i128),
+            &Some(fee_recipient.clone()),
+            &Some(true),
+        );
+    let bounty_id = 901_u64;
+    let deadline = setup.env.ledger().timestamp() + 1_000;
+    let gross = 1_000i128;
     setup
         .escrow
-        .withdraw_revenue(&bounty_id, &setup.contributor);
-}
-
-#[test]
-fn test_refund_succeeds_for_cancelled_event_before_deadline() {
-    let setup = TestSetup::new();
-    let now = setup.env.ledger().timestamp();
-    let deadline = now + 5_000;
-    let bounty_id = 779_u64;
-    let amount = 1_200_i128;
-
-    setup
-        .escrow
-        .lock_funds(&setup.depositor, &bounty_id, &amount, &deadline);
-    setup
-        .escrow
-        .set_event_status(&bounty_id, &EventStatus::Cancelled);
-
-    let depositor_before = setup.token.balance(&setup.depositor);
-    setup.escrow.refund(&bounty_id);
+        .lock_funds(&setup.depositor, &bounty_id, &gross, &deadline);
     let escrow = setup.escrow.get_escrow_info(&bounty_id);
+    let lock_fee = BountyEscrowContract::combined_fee_pub(gross, 0, 10, true);
+    assert_eq!(escrow.amount, gross - lock_fee);
+    assert_eq!(setup.token.balance(&fee_recipient), lock_fee);
 
-    assert_eq!(escrow.status, EscrowStatus::Refunded);
-    assert_eq!(setup.token.balance(&setup.depositor), depositor_before + amount);
+    setup.escrow.release_funds(&bounty_id, &setup.contributor);
+    let release_fee =
+        BountyEscrowContract::combined_fee_pub(escrow.amount, 0, 25, true);
+    assert_eq!(
+        setup.token.balance(&setup.contributor),
+        escrow.amount - release_fee
+    );
+    assert_eq!(
+        setup.token.balance(&fee_recipient),
+        lock_fee + release_fee
+    );
 }

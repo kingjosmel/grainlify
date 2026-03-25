@@ -65,12 +65,7 @@ fn test_admin_contract_permissions() {
     assert!(setup.client.get_pause_flags().lock_paused);
 
     // Admin should be able to update fee config
-    setup.client.update_fee_config(
-        &Some(100),
-        &Some(100),
-        &Some(setup.admin.clone()),
-        &Some(true),
-    );
+    setup.client.update_fee_config(&Some(100), &Some(100), &None, &None, &Some(setup.admin.clone()), &Some(true));
 }
 
 #[test]

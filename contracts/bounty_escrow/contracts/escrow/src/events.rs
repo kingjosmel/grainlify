@@ -75,6 +75,8 @@ pub struct FeeCollected {
     pub operation_type: FeeOperationType,
     pub amount: i128,
     pub fee_rate: i128,
+    /// Configured flat fee component for this operation (before cap to principal/payout).
+    pub fee_fixed: i128,
     pub recipient: Address,
     pub timestamp: u64,
 }
@@ -102,6 +104,8 @@ pub fn emit_batch_funds_locked(env: &Env, event: BatchFundsLocked) {
 pub struct FeeConfigUpdated {
     pub lock_fee_rate: i128,
     pub release_fee_rate: i128,
+    pub lock_fixed_fee: i128,
+    pub release_fixed_fee: i128,
     pub fee_recipient: Address,
     pub fee_enabled: bool,
     pub timestamp: u64,
