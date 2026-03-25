@@ -5099,7 +5099,7 @@ impl traits::PauseInterface for BountyEscrowContract {
     }
 
     fn is_operation_paused(env: &Env, operation: soroban_sdk::Symbol) -> bool {
-        BountyEscrowContract::check_paused(env, operation)
+        Self::check_paused(env, operation)
     }
 }
 
