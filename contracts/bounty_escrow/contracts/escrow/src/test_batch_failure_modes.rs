@@ -83,6 +83,21 @@ fn setup() -> Ctx<'static> {
     let admin = Address::generate(&env);
     let token_admin = Address::generate(&env);
     let token_id = env.register_stellar_asset_contract(token_admin.clone());
+    /// Convenience: build a single `LockFundsItem`.
+    fn lock_item(
+        env: &Env,
+        bounty_id: u64,
+        depositor: Address,
+        amount: i128,
+        deadline: u64,
+    ) -> LockFundsItem {
+        LockFundsItem {
+            bounty_id,
+            depositor,
+            amount,
+            deadline,
+        }
+    }
 
     let contract_id = env.register_contract(None, BountyEscrowContract);
     let client = BountyEscrowContractClient::new(&env, &contract_id);
@@ -290,6 +305,31 @@ fn batch_lock_duplicate_last_item_rolls_back_all_previous_siblings() {
         "sibling bounty 11 must not be stored"
     );
 }
+    /// Contract must be initialized before batch locking.
+    #[test]
+    fn batch_lock_not_initialized_fails() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        // Register contract WITHOUT calling init
+        let contract_id = env.register_contract(None, BountyEscrowContract);
+        let client = BountyEscrowContractClient::new(&env, &contract_id);
+
+        // We need a real token address just to build the item; use a dummy address
+        let depositor = Address::generate(&env);
+        let items = vec![
+            &env,
+            LockFundsItem {
+                bounty_id: 1,
+                depositor,
+                amount: 100,
+                deadline: 9_999_999,
+            },
+        ];
+
+        let result = client.try_batch_lock_funds(&items);
+        assert_eq!(result, Err(Ok(Error::NotInitialized)));
+    }
 
 // ---------------------------------------------------------------------------
 // Uninitialized contract
