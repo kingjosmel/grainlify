@@ -522,7 +522,7 @@ pub enum DataKey {
     ProgramDependencies(String),     // program_id -> Vec<String>
     DependencyStatus(String),        // program_id -> DependencyStatus
     Dispute,  
-    SplitConfig(String),                       // DisputeRecord (single active dispute per contract)
+    DisputeRecord(String),                     // DisputeRecord (single active dispute per contract)
 }
 
 #[contracttype]
@@ -825,6 +825,7 @@ mod token_math;
 mod test_maintenance_mode;
 mod test_risk_flags;
 #[cfg(test)]
+mod test_token_math;
 // mod test_serialization_compatibility;
 
 // mod test_payout_splits;
@@ -976,7 +977,7 @@ impl ProgramEscrowContract {
                     cfg.lock_fixed_fee,
                     cfg.fee_enabled,
                 );
-                let net = amount.checked_sub(fee).unwrap_or(0);
+                let net = crate::token_math::safe_sub(amount, fee);
                 if net <= 0 {
                     panic!("Lock fee consumes entire initial liquidity");
                 }
@@ -1015,7 +1016,7 @@ impl ProgramEscrowContract {
                 tags: soroban_sdk::Vec::new(&env),
                 start_date: None,
                 end_date: None,
-                custom_fields: soroban_sdk::Map::new(&env),
+                custom_fields: soroban_sdk::Vec::new(&env),
             },
             reference_hash,
             archived: false,
@@ -1161,7 +1162,7 @@ impl ProgramEscrowContract {
         );
 
         if let Some(program_metadata) = metadata {
-            program_data.metadata = Some(program_metadata);
+            program_data.metadata = program_metadata;
             Self::store_program_data(&env, &program_id, &program_data);
         }
 
@@ -1176,15 +1177,7 @@ impl ProgramEscrowContract {
     /// * `program_id` - The program ID
     pub fn get_program_metadata(env: Env, program_id: String) -> ProgramMetadata {
         let program: ProgramData = env.storage().instance().get(&DataKey::Program(program_id)).expect("Program not found");
-        program.metadata.unwrap_or_else(|| ProgramMetadata {
-            program_name: None,
-            program_type: None,
-            ecosystem: None,
-            tags: soroban_sdk::Vec::new(&env),
-            start_date: None,
-            end_date: None,
-            custom_fields: soroban_sdk::Vec::new(&env),
-        })
+        program.metadata
     }
 
     /// Query programs by type
@@ -1196,15 +1189,14 @@ impl ProgramEscrowContract {
 
         for id in registry.iter() {
             if let Some(program) = env.storage().instance().get::<_, ProgramData>(&DataKey::Program(id.clone())) {
-                if let Some(meta) = program.metadata {
-                    if let Some(ptype) = meta.program_type {
-                        if ptype == program_type {
-                            if skipped < start {
-                                skipped += 1;
-                            } else if count < limit {
-                                result.push_back(id.clone());
-                                count += 1;
-                            }
+                let meta = program.metadata;
+                if let Some(ptype) = meta.program_type {
+                    if ptype == program_type {
+                        if skipped < start {
+                            skipped += 1;
+                        } else if count < limit {
+                            result.push_back(id.clone());
+                            count += 1;
                         }
                     }
                 }
@@ -1222,15 +1214,14 @@ impl ProgramEscrowContract {
 
         for id in registry.iter() {
             if let Some(program) = env.storage().instance().get::<_, ProgramData>(&DataKey::Program(id.clone())) {
-                if let Some(meta) = program.metadata {
-                    if let Some(eco) = meta.ecosystem {
-                        if eco == ecosystem {
-                            if skipped < start {
-                                skipped += 1;
-                            } else if count < limit {
-                                result.push_back(id.clone());
-                                count += 1;
-                            }
+                let meta = program.metadata;
+                if let Some(eco) = meta.ecosystem {
+                    if eco == ecosystem {
+                        if skipped < start {
+                            skipped += 1;
+                        } else if count < limit {
+                            result.push_back(id.clone());
+                            count += 1;
                         }
                     }
                 }
@@ -1248,16 +1239,16 @@ impl ProgramEscrowContract {
 
         for id in registry.iter() {
             if let Some(program) = env.storage().instance().get::<_, ProgramData>(&DataKey::Program(id.clone())) {
-                if let Some(meta) = program.metadata {
-                    let mut has_tag = false;
-                    for t in meta.tags.iter() {
-                        if t == tag {
-                            has_tag = true;
-                            break;
-                        }
+                let meta = program.metadata;
+                let mut has_tag = false;
+                for t in meta.tags.iter() {
+                    if t == tag {
+                        has_tag = true;
+                        break;
                     }
-                    if has_tag {
-                        if skipped < start {
+                }
+                if has_tag {
+                    if skipped < start {
                             skipped += 1;
                         } else if count < limit {
                             result.push_back(id.clone());
@@ -1266,7 +1257,6 @@ impl ProgramEscrowContract {
                     }
                 }
             }
-        }
         result
     }
 
@@ -1335,7 +1325,7 @@ impl ProgramEscrowContract {
                 tags: soroban_sdk::Vec::new(&env),
                 start_date: None,
                 end_date: None,
-                custom_fields: soroban_sdk::Map::new(&env),
+                custom_fields: soroban_sdk::Vec::new(&env),
             },
                 reference_hash: item.reference_hash.clone(),
                 archived: false,
@@ -1382,10 +1372,8 @@ impl ProgramEscrowContract {
         if fee_rate == 0 || amount == 0 {
             return 0;
         }
-        let numerator = amount
-            .checked_mul(fee_rate)
-            .and_then(|x| x.checked_add(BASIS_POINTS - 1))
-            .unwrap_or(0);
+        let product = crate::token_math::safe_mul(amount, fee_rate);
+        let numerator = crate::token_math::safe_add(product, BASIS_POINTS - 1);
         if numerator == 0 {
             return 0;
         }
@@ -1566,7 +1554,7 @@ impl ProgramEscrowContract {
             fee_config.lock_fixed_fee,
             fee_config.fee_enabled,
         );
-        let net_amount = amount.checked_sub(fee_amount).unwrap_or(0);
+        let net_amount = crate::token_math::safe_sub(amount, fee_amount);
         if net_amount <= 0 {
             panic!("Lock fee consumes entire lock amount");
         }
@@ -1592,15 +1580,9 @@ impl ProgramEscrowContract {
         }
 
         // Credit net amount to program accounting (gross `amount` should already be on contract balance)
-        program_data.total_funds = program_data
-            .total_funds
-            .checked_add(net_amount)
-            .unwrap_or_else(|| panic!("Total funds overflow"));
+        program_data.total_funds = crate::token_math::safe_add(program_data.total_funds, net_amount);
 
-        program_data.remaining_balance = program_data
-            .remaining_balance
-            .checked_add(net_amount)
-            .unwrap_or_else(|| panic!("Remaining balance overflow"));
+        program_data.remaining_balance = crate::token_math::safe_add(program_data.remaining_balance, net_amount);
 
         // Store updated data
         env.storage().instance().set(&PROGRAM_DATA, &program_data);
@@ -1923,7 +1905,7 @@ impl ProgramEscrowContract {
             }
         }
 
-        program_data.metadata = Some(metadata);
+        program_data.metadata = metadata;
         Self::store_program_data(&env, &program_id, &program_data);
 
         // Emit updated event
@@ -2404,10 +2386,7 @@ impl ProgramEscrowContract {
                 reentrancy_guard::clear_entered(&env);
                 panic!("All amounts must be greater than zero");
             }
-            total_payout = total_payout.checked_add(amount).unwrap_or_else(|| {
-                reentrancy_guard::clear_entered(&env);
-                panic!("Payout amount overflow")
-            });
+            total_payout = crate::token_math::safe_add(total_payout, amount);
         }
 
         // 6. Business logic: sufficient balance
@@ -2443,7 +2422,7 @@ impl ProgramEscrowContract {
                 cfg.payout_fixed_fee,
                 cfg.fee_enabled,
             );
-            let net = gross.checked_sub(pay_fee).unwrap_or(0);
+            let net = crate::token_math::safe_sub(gross, pay_fee);
             if net <= 0 {
                 reentrancy_guard::clear_entered(&env);
                 panic!("Payout fee consumes entire payout");
@@ -2601,7 +2580,7 @@ impl ProgramEscrowContract {
             cfg.payout_fixed_fee,
             cfg.fee_enabled,
         );
-        let net = amount.checked_sub(pay_fee).unwrap_or(0);
+        let net = crate::token_math::safe_sub(amount, pay_fee);
         if net <= 0 {
             reentrancy_guard::clear_entered(&env);
             panic!("Payout fee consumes entire payout");
@@ -2952,14 +2931,8 @@ impl ProgramEscrowContract {
             );
         }
 
-        program_data.total_funds = program_data
-            .total_funds
-            .checked_add(amount)
-            .expect("Total funds overflow");
-        program_data.remaining_balance = program_data
-            .remaining_balance
-            .checked_add(net_amount)
-            .expect("Remaining balance overflow");
+        program_data.total_funds = crate::token_math::safe_add(program_data.total_funds, amount);
+        program_data.remaining_balance = crate::token_math::safe_add(program_data.remaining_balance, net_amount);
 
         env.storage().instance().set(&program_key, &program_data);
 
